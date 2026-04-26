@@ -23,6 +23,16 @@ OPENAI_VISION_MODEL=gpt-4.1-mini
 
 If `OPENAI_API_KEY` is missing, the app returns mock candidates so the confirmation flow remains testable.
 
+## Scan Troubleshooting
+
+When recognition fails, the app shows recovery options in the scan screen:
+
+- Try the same photo again.
+- Add the bottle manually.
+- Follow provider-specific suggestions, such as checking `OPENAI_API_KEY` in Vercel and redeploying.
+
+An OpenAI `401` usually means the Vercel environment variable is missing, copied incorrectly, or the deployment was not redeployed after the key changed.
+
 ## Commands
 
 ```bash

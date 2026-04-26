@@ -13,6 +13,12 @@ type EditableCandidate = WineBottleCandidate & {
   status: CandidateStatus;
 };
 
+type RecognitionErrorState = {
+  message: string;
+  code?: string;
+  suggestions: string[];
+};
+
 const colors: WineColor[] = [
   "red",
   "white",
@@ -44,7 +50,7 @@ export default function ScanWinePage() {
   const [savedBottles, setSavedBottles] = useState<WineBottleCandidate[]>([]);
   const [isRecognizing, setIsRecognizing] = useState(false);
   const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
+  const [error, setError] = useState<RecognitionErrorState | null>(null);
 
   const confirmedCount = useMemo(
     () => candidates.filter((candidate) => candidate.status === "confirmed").length,
@@ -56,7 +62,7 @@ export default function ScanWinePage() {
     setSelectedFile(file);
     setCandidates([]);
     setMessage("");
-    setError("");
+    setError(null);
 
     if (previewUrl) {
       URL.revokeObjectURL(previewUrl);
@@ -69,12 +75,15 @@ export default function ScanWinePage() {
     event.preventDefault();
 
     if (!selectedFile) {
-      setError("Choose a bottle photo first.");
+      setError({
+        message: "Choose a bottle photo first.",
+        suggestions: ["Select a photo, then try scanning again."]
+      });
       return;
     }
 
     setIsRecognizing(true);
-    setError("");
+    setError(null);
     setMessage("");
 
     try {
@@ -89,7 +98,8 @@ export default function ScanWinePage() {
       const body = await response.json();
 
       if (!response.ok) {
-        throw new Error(body.error || "Recognition failed.");
+        setError(normalizeRecognitionError(body));
+        return;
       }
 
       const nextCandidates = Array.isArray(body.bottles)
@@ -105,11 +115,16 @@ export default function ScanWinePage() {
           : `${nextCandidates.length} bottle candidate${nextCandidates.length === 1 ? "" : "s"} found.`
       );
     } catch (recognitionError) {
-      setError(
-        recognitionError instanceof Error
-          ? recognitionError.message
-          : "Recognition failed."
-      );
+      setError({
+        message:
+          recognitionError instanceof Error
+            ? recognitionError.message
+            : "Recognition failed.",
+        suggestions: [
+          "Check your connection and try again.",
+          "Add the bottle manually if scanning keeps failing."
+        ]
+      });
     } finally {
       setIsRecognizing(false);
     }
@@ -217,7 +232,7 @@ export default function ScanWinePage() {
             </button>
           </div>
 
-          <form onSubmit={handleRecognize}>
+          <form id="scan-form" onSubmit={handleRecognize}>
             <div className="upload-row">
               <label className="file-control">
                 <span className="file-label">Choose photo</span>
@@ -244,7 +259,14 @@ export default function ScanWinePage() {
           ) : null}
 
           {message ? <div className="status">{message}</div> : null}
-          {error ? <div className="error">{error}</div> : null}
+          {error ? (
+            <ScanErrorPanel
+              error={error}
+              hasSelectedFile={Boolean(selectedFile)}
+              isRecognizing={isRecognizing}
+              onAddManual={addManualBottle}
+            />
+          ) : null}
 
           {candidates.length > 0 ? (
             <>
@@ -305,6 +327,49 @@ export default function ScanWinePage() {
           </div>
         </section>
       </main>
+    </div>
+  );
+}
+
+function ScanErrorPanel({
+  error,
+  hasSelectedFile,
+  isRecognizing,
+  onAddManual
+}: {
+  error: RecognitionErrorState;
+  hasSelectedFile: boolean;
+  isRecognizing: boolean;
+  onAddManual: () => void;
+}) {
+  return (
+    <div className="error-panel">
+      <div>
+        <strong>Scan did not complete</strong>
+        <p>{error.message}</p>
+      </div>
+
+      {error.suggestions.length > 0 ? (
+        <ul>
+          {error.suggestions.map((suggestion) => (
+            <li key={suggestion}>{suggestion}</li>
+          ))}
+        </ul>
+      ) : null}
+
+      <div className="card-actions">
+        <button
+          className="button"
+          disabled={!hasSelectedFile || isRecognizing}
+          type="submit"
+          form="scan-form"
+        >
+          Try again
+        </button>
+        <button className="button secondary" type="button" onClick={onAddManual}>
+          Add manually
+        </button>
+      </div>
     </div>
   );
 }
@@ -516,4 +581,29 @@ function stripCandidateState(candidate: EditableCandidate): WineBottleCandidate 
 
 function displayWineName(bottle: WineBottleCandidate) {
   return [bottle.producer, bottle.name].filter(Boolean).join(" ") || "Unnamed wine";
+}
+
+function normalizeRecognitionError(value: unknown): RecognitionErrorState {
+  if (typeof value !== "object" || value === null) {
+    return {
+      message: "Recognition failed.",
+      suggestions: ["Try again.", "Add the bottle manually if scanning keeps failing."]
+    };
+  }
+
+  const body = value as {
+    error?: unknown;
+    code?: unknown;
+    suggestions?: unknown;
+  };
+
+  return {
+    message: typeof body.error === "string" ? body.error : "Recognition failed.",
+    code: typeof body.code === "string" ? body.code : undefined,
+    suggestions: Array.isArray(body.suggestions)
+      ? body.suggestions.filter(
+          (suggestion): suggestion is string => typeof suggestion === "string"
+        )
+      : ["Try again.", "Add the bottle manually if scanning keeps failing."]
+  };
 }

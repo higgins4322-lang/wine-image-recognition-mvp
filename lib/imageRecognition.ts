@@ -9,6 +9,18 @@ type RecognizeWineInput = {
   mimeType: string;
 };
 
+export class WineRecognitionError extends Error {
+  status: number;
+  code: string;
+
+  constructor(message: string, status: number, code: string) {
+    super(message);
+    this.name = "WineRecognitionError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
 const allowedColors: WineColor[] = [
   "red",
   "white",
@@ -122,7 +134,11 @@ export async function recognizeWineImage({
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`Vision recognition failed: ${response.status} ${errorText}`);
+    throw new WineRecognitionError(
+      getProviderErrorMessage(response.status),
+      response.status,
+      getProviderErrorCode(response.status, errorText)
+    );
   }
 
   const data = (await response.json()) as { output_text?: string };
@@ -267,4 +283,36 @@ function isBottleCandidate(
   value: WineBottleCandidate | null
 ): value is WineBottleCandidate {
   return value !== null;
+}
+
+function getProviderErrorMessage(status: number): string {
+  if (status === 401) {
+    return "OpenAI rejected the API key configured for this deployment.";
+  }
+
+  if (status === 429) {
+    return "OpenAI rate limits or quota prevented this scan from completing.";
+  }
+
+  if (status >= 500) {
+    return "OpenAI was temporarily unavailable.";
+  }
+
+  return "The vision model could not process this scan.";
+}
+
+function getProviderErrorCode(status: number, errorText: string): string {
+  if (status === 401) {
+    return "openai_unauthorized";
+  }
+
+  if (status === 429) {
+    return "openai_rate_limited";
+  }
+
+  if (errorText.toLowerCase().includes("model")) {
+    return "openai_model_error";
+  }
+
+  return "openai_request_failed";
 }
